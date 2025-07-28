@@ -8,18 +8,31 @@ from pathlib import Path
 config={
     "lr_classifier": 1e-2,
     "lr_backbone": 1e-4,
+    "dataset_iterations": 4, # on average, each picture is shown in each orientation
     "scheduler": {
         "type": "cosine_warm_restarts",
-        "t0": 2,
-        "t_mult": 2,
+        "t0": 2, # 2 epochs till first restart
+        "t_mult": 2, 
         "eta_min": 1e-5,
+    },
+    "train_class_weights": { # train on equal probability classes
+        0: 0.25,
+        90: 0.25,
+        180: 0.25,
+        270: 0.25,
+    },
+    "test_class_weights": { # Unbalanced on purpose to see how it biases 
+        0: 0.97,
+        90: 0.01,
+        180: 0.01,
+        270: 0.01,
     },
     "batch_size": 256,
     "datasets": ["flickr30k"],
     "epochs": 20,
 }
 
-train, test = get_train_dataset(oversample=10), get_test_dataset(oversample=10)
+train, test = get_train_dataset(oversample=config['dataset_oversample']), get_test_dataset(oversample=config['dataset_oversample'])
 train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=4, shuffle=True)
 test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=4, shuffle=True)
                          
@@ -35,13 +48,15 @@ def cyclic_generator(loader: DataLoader):
 
 periodic_eval_loader = cyclic_generator(test_loader)
 
-
 model = RotationClassfier()
 model.to("mps")
-optimizer = torch.optim.AdamW(model.parameters())
+optimizer = torch.optim.AdamW([
+    {"params": model.mobilenet_v2.parameters(), "lr": config['lr_backbone']}, 
+    {"params": model.classifier.parameters(), "lr": config['lr_classifier']},
+    
+])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=config['scheduler']['t0'], T_mult=config['scheduler']['t_mult'], eta_min=config['scheduler']['eta_min'])
 loss_fn = torch.nn.CrossEntropyLoss()
-
 
 def log_grad_metrics(model: RotationClassfier, run):
     # We log the following metrics for the gradients
@@ -57,7 +72,21 @@ def log_grad_metrics(model: RotationClassfier, run):
     training = model.training
     model.train(False)
     def log_stats_for_module(module: nn.Module, prefix: str):
-        pass
+        params = module.parameters()
+        grads = [p.grad for p in params if p.grad is not None and p.requires_grad]
+        if not grads:
+            return
+        grads = torch.cat([g.flatten() for g in grads])
+        run.log({
+            f"grad/{prefix}/l2_norm": grads.norm(p=2),
+            f"grad/{prefix}/l1_norm": grads.norm(p=1),
+            f"grad/{prefix}/mean": grads.mean(),
+            f"grad/{prefix}/variance": grads.var(),
+            f"grad/{prefix}/pct_zeroes": (grads == 0).float().mean(),
+        })
+    log_stats_for_module(model, "overall"),
+    log_stats_for_module(model.mobilenet_v2, "backbone"),
+    log_stats_for_module(model.classifier, "classifier")
     model.train(training)
 
 def log_weight_metrics(model: RotationClassfier, run):
@@ -70,7 +99,21 @@ def log_weight_metrics(model: RotationClassfier, run):
     # - Overall
     # - Backbone
     # - Classifier
-    pass
+    training = model.training
+    model.train(False)
+    def log_stats_for_module(module: nn.Module, prefix: str):
+        params = [p for p in model.parameters() if p.requires_grad]
+        params = torch.cat([p.flatten() for p in params])
+        run.log({
+            f"weights/{prefix}/l2_norm": params.norm(p=2),
+            f"weights/{prefix}/l1_norm": params.norm(p=1),
+            f"weights/{prefix}/mean": params.mean(),
+            f"weights/{prefix}/variance": params.var(),
+        })
+    log_stats_for_module(model, "overall"),
+    log_stats_for_module(model.mobilenet_v2, "backbone"),
+    log_stats_for_module(model.classifier, "classifier"),
+    model.train(training)
 
 def train_epoch(epoch_idx: int, run):
     model.train(True)
@@ -91,6 +134,8 @@ def train_epoch(epoch_idx: int, run):
         optimizer.step()
         scheduler.step(epoch_idx + idx / len(train_loader)) # fractional epoch
         if idx % 10 == 0:
+            log_grad_metrics(model, run)
+            log_weight_metrics(model, run)
             test(run)
     validate(run)
 

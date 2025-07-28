@@ -66,16 +66,16 @@ xform = v2.Compose([
     v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-def get_train_dataset(oversample: int = 1) -> Dataset:
+def get_train_dataset(oversample: int = 1, rotation_sample_weights: dict[int, int] | None = None) -> Dataset:
     datasets = []
     for i in range(oversample):
-        datasets.append(RandomRotationDataset(flickr30k_train, xform=xform))
+        datasets.append(RandomRotationDataset(flickr30k_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
-def get_test_dataset(oversample: int = 1) -> Dataset:
+def get_test_dataset(oversample: int = 1, rotation_sample_weights: dict[int, int] | None = None) -> Dataset:
     datasets = []
     for i in range(oversample):
-        datasets.append(RandomRotationDataset(flickr30k_test, xform=xform))
+        datasets.append(RandomRotationDataset(flickr30k_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
 # Visualization of the first 25 images in ds in a 5x5 grid
