@@ -10,9 +10,9 @@ class RotationClassfier(nn.Module):
         self.mobilenet_v2.classifier = nn.Identity()
         self.classifier = nn.Sequential(
             nn.Dropout(p=0.2, inplace=False),
-            nn.Linear(in_features=1280, out_features=64, bias=True),
+            nn.Linear(in_features=1280, out_features=2048, bias=True),
             nn.ReLU6(),
-            nn.Linear(in_features=64, out_features=4, bias=True)
+            nn.Linear(in_features=2048, out_features=4, bias=True)
         )
 
     def forward(self, x: torch.Tensor):

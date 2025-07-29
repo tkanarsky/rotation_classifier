@@ -9,6 +9,8 @@ from torchvision.transforms import v2
 
 flickr30k = load_dataset("nlphuji/flickr30k")['test'] # only has test split for whatever reason...
 flickr30k_train, flickr30k_test = random_split(flickr30k, [0.8, 0.2])
+places365 = load_dataset("Andron00e/Places365-custom")['train']   
+places365_train, places365_test = random_split(places365, [0.8, 0.2])
 
 rotation_to_label = {
     0: 0,
@@ -32,8 +34,8 @@ class RandomRotationDataset(Dataset):
         self.dataset = dataset
         self.xform = xform
         if rotation_sample_weights is not None:
-            self.rotations = list(self.rotation_sample_weights.keys())
-            self.rotation_weights = list(self.rotation_sample_weights.values())
+            self.rotations = list(rotation_sample_weights.keys())
+            self.rotation_weights = list(rotation_sample_weights.values())
         else:
             self.rotations = [0, 90, 180, 270]
             self.rotation_weights = [0.25, 0.25, 0.25, 0.25]
@@ -70,12 +72,14 @@ def get_train_dataset(oversample: int = 1, rotation_sample_weights: dict[int, in
     datasets = []
     for i in range(oversample):
         datasets.append(RandomRotationDataset(flickr30k_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
+        datasets.append(RandomRotationDataset(places365_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
 def get_test_dataset(oversample: int = 1, rotation_sample_weights: dict[int, int] | None = None) -> Dataset:
     datasets = []
     for i in range(oversample):
         datasets.append(RandomRotationDataset(flickr30k_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
+        datasets.append(RandomRotationDataset(places365_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
 # Visualization of the first 25 images in ds in a 5x5 grid
@@ -92,7 +96,7 @@ def imshow(img):
     return img
 
 if __name__ == "__main__":
-    ds = get_test_dataset(xform)
+    ds = get_test_dataset(oversample=1)
     fig, axes = plt.subplots(5, 5, figsize=(12, 12))
     for i in range(25):
         sample = ds[i]

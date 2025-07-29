@@ -3,12 +3,13 @@ from dataset import get_train_dataset, get_test_dataset
 from torch.utils.data import DataLoader
 from model import RotationClassfier
 import torch.nn as nn
+import gc
 import wandb
 from pathlib import Path
 config={
     "lr_classifier": 1e-2,
     "lr_backbone": 1e-4,
-    "dataset_iterations": 4, # on average, each picture is shown in each orientation
+    "dataset_iterations": 4, # on average, each picture is shown in each orientation per epoch
     "scheduler": {
         "type": "cosine_warm_restarts",
         "t0": 2, # 2 epochs till first restart
@@ -27,12 +28,13 @@ config={
         180: 0.01,
         270: 0.01,
     },
-    "batch_size": 256,
-    "datasets": ["flickr30k"],
+    "batch_size": 450,
+    "datasets": ["flickr30k", "places365"],
     "epochs": 20,
+    # "checkpoint_file": "/Users/tim/projects/rotation_classifier/runs/dry-dust-39/46/ckpt.pt"
 }
 
-train, test = get_train_dataset(oversample=config['dataset_oversample']), get_test_dataset(oversample=config['dataset_oversample'])
+train, test = get_train_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['train_class_weights']), get_test_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['test_class_weights'])
 train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=4, shuffle=True)
 test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=4, shuffle=True)
                          
@@ -47,13 +49,14 @@ def cyclic_generator(loader: DataLoader):
             yield next(iterator)
 
 periodic_eval_loader = cyclic_generator(test_loader)
-
-model = RotationClassfier()
+if config.get("checkpoint_file", None) is not None:
+    model = torch.load(Path(config["checkpoint_file"]), weights_only=False)
+else:
+    model = RotationClassfier()
 model.to("mps")
 optimizer = torch.optim.AdamW([
     {"params": model.mobilenet_v2.parameters(), "lr": config['lr_backbone']}, 
     {"params": model.classifier.parameters(), "lr": config['lr_classifier']},
-    
 ])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=config['scheduler']['t0'], T_mult=config['scheduler']['t_mult'], eta_min=config['scheduler']['eta_min'])
 loss_fn = torch.nn.CrossEntropyLoss()
@@ -130,7 +133,13 @@ def train_epoch(epoch_idx: int, run):
         correct = (y == preds).float()
         accuracy = correct.mean()
         print(f"Minibatch {idx}: loss {float(loss)}, accuracy: {accuracy}")
-        run.log({"train/loss": loss, "train/accuracy": accuracy, "lr": optimizer.param_groups[0]['lr']})
+        run.log({
+            "train/loss": float(loss), 
+            "train/accuracy": accuracy, 
+            "lr/backbone": optimizer.param_groups[0]['lr'],
+            "lr/classifier": optimizer.param_groups[1]['lr'],
+            "epoch": epoch_idx + idx / len(train_loader)
+            })
         optimizer.step()
         scheduler.step(epoch_idx + idx / len(train_loader)) # fractional epoch
         if idx % 10 == 0:
@@ -192,3 +201,5 @@ if __name__ == "__main__":
         save_dir = Path("/Users/tim/projects/rotation_classifier/runs") / run.name / str(i)
         save_dir.mkdir(exist_ok=True, parents=True)
         torch.save(model, Path("runs") / run.name / str(i) / "ckpt.pt")
+        gc.collect()
+        torch.mps.empty_cache()
