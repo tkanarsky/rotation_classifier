@@ -7,9 +7,9 @@ import torch
 from torchvision.transforms import v2
 
 
-flickr30k = load_dataset("nlphuji/flickr30k")['test'] # only has test split for whatever reason...
+flickr30k = load_dataset("nlphuji/flickr30k", num_proc=32)['test'] # only has test split for whatever reason...
 flickr30k_train, flickr30k_test = random_split(flickr30k, [0.8, 0.2])
-places365 = load_dataset("Andron00e/Places365-custom")['train']   
+places365 = load_dataset("Andron00e/Places365-custom", num_proc=32)['train']   
 places365_train, places365_test = random_split(places365, [0.8, 0.2])
 
 rotation_to_label = {

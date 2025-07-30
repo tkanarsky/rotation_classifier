@@ -6,8 +6,12 @@ import torch.nn as nn
 import gc
 import wandb
 from pathlib import Path
+
+torch.set_float32_matmul_precision('medium')
+torch.backends.cudnn.benchmark = True
+
 config={
-    "lr_classifier": 1e-2,
+    "lr_classifier": 1e-3,
     "lr_backbone": 1e-4,
     "dataset_iterations": 4, # on average, each picture is shown in each orientation per epoch
     "scheduler": {
@@ -28,15 +32,16 @@ config={
         180: 0.01,
         270: 0.01,
     },
-    "batch_size": 450,
+    "batch_size": 650,
     "datasets": ["flickr30k", "places365"],
     "epochs": 20,
+    "amp": True
     # "checkpoint_file": "/Users/tim/projects/rotation_classifier/runs/dry-dust-39/46/ckpt.pt"
 }
 
 train, test = get_train_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['train_class_weights']), get_test_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['test_class_weights'])
-train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=4, shuffle=True)
-test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=4, shuffle=True)
+train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=16, shuffle=True)
+test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=16, shuffle=True)
                          
 # Allows continuously sampling the test set during continuous evals.
 def cyclic_generator(loader: DataLoader):
@@ -53,13 +58,17 @@ if config.get("checkpoint_file", None) is not None:
     model = torch.load(Path(config["checkpoint_file"]), weights_only=False)
 else:
     model = RotationClassfier()
-model.to("mps")
+model.to("cuda")
+print("Compiling...")
+model.compile()
+print("Compiled!")
 optimizer = torch.optim.AdamW([
     {"params": model.mobilenet_v2.parameters(), "lr": config['lr_backbone']}, 
     {"params": model.classifier.parameters(), "lr": config['lr_classifier']},
 ])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=config['scheduler']['t0'], T_mult=config['scheduler']['t_mult'], eta_min=config['scheduler']['eta_min'])
 loss_fn = torch.nn.CrossEntropyLoss()
+scaler = torch.amp.GradScaler("cuda", enabled=config['amp'])
 
 def log_grad_metrics(model: RotationClassfier, run):
     # We log the following metrics for the gradients
@@ -122,13 +131,16 @@ def train_epoch(epoch_idx: int, run):
     model.train(True)
     print(f"Starting train of epoch {epoch_idx}")
     for idx, data in enumerate(train_loader):
-        x, y = data['image'], data['rotation_label']
-        x = x.to("mps")
-        y = y.to("mps")
         optimizer.zero_grad()
-        y_hat = model(x)
-        loss = loss_fn(y_hat, y)
-        loss.backward()
+        x, y = data['image'], data['rotation_label']
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=config['amp']):
+            x = x.to("cuda", non_blocking=True)
+            y = y.to("cuda", non_blocking=True)
+            y_hat = model(x)
+            loss = loss_fn(y_hat, y)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         preds = y_hat.argmax(axis=1)
         correct = (y == preds).float()
         accuracy = correct.mean()
@@ -146,6 +158,8 @@ def train_epoch(epoch_idx: int, run):
             log_grad_metrics(model, run)
             log_weight_metrics(model, run)
             test(run)
+        if idx % 2500 == 0:
+            torch.save(model, Path("runs") / run.name / str(epoch_idx) / f"{idx}.pt")
     validate(run)
 
 def test(run):
@@ -154,8 +168,8 @@ def test(run):
     with torch.no_grad():
         data = next(periodic_eval_loader)
         x, y = data['image'], data['rotation_label']
-        x = x.to("mps")
-        y = y.to("mps")
+        x = x.to("cuda")
+        y = y.to("cuda")
         y_hat = model(x)
         loss = loss_fn(y_hat, y)
         preds = y_hat.argmax(axis=1)
@@ -175,8 +189,8 @@ def validate(run):
     with torch.no_grad():
         for idx, data in enumerate(test_loader):
             x, y = data['image'], data['rotation_label']
-            x = x.to("mps")
-            y = y.to("mps")
+            x = x.to("cuda")
+            y = y.to("cuda")
             y_hat = model(x)
             loss = loss_fn(y_hat, y)
             total_loss += float(loss)
@@ -197,9 +211,7 @@ if __name__ == "__main__":
        config=config
     )
     for i in range(config["epochs"]):
-        train_epoch(i, run)
-        save_dir = Path("/Users/tim/projects/rotation_classifier/runs") / run.name / str(i)
+        save_dir = Path("/workspace/rotation_classifier/runs") / run.name / str(i)
         save_dir.mkdir(exist_ok=True, parents=True)
-        torch.save(model, Path("runs") / run.name / str(i) / "ckpt.pt")
-        gc.collect()
-        torch.mps.empty_cache()
+        train_epoch(i, run)
+        torch.save(model, Path("runs") / run.name / str(i) / "final.pt")
