@@ -32,7 +32,7 @@ config={
         180: 0.01,
         270: 0.01,
     },
-    "batch_size": 650,
+    "batch_size": 460,
     "datasets": ["flickr30k", "places365"],
     "epochs": 20,
     "amp": True
@@ -63,7 +63,7 @@ print("Compiling...")
 model.compile()
 print("Compiled!")
 optimizer = torch.optim.AdamW([
-    {"params": model.mobilenet_v2.parameters(), "lr": config['lr_backbone']}, 
+    {"params": model.efficientnet_v2.parameters(), "lr": config['lr_backbone']}, 
     {"params": model.classifier.parameters(), "lr": config['lr_classifier']},
 ])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=config['scheduler']['t0'], T_mult=config['scheduler']['t_mult'], eta_min=config['scheduler']['eta_min'])
@@ -97,7 +97,7 @@ def log_grad_metrics(model: RotationClassfier, run):
             f"grad/{prefix}/pct_zeroes": (grads == 0).float().mean(),
         })
     log_stats_for_module(model, "overall"),
-    log_stats_for_module(model.mobilenet_v2, "backbone"),
+    log_stats_for_module(model.efficientnet_v2, "backbone"),
     log_stats_for_module(model.classifier, "classifier")
     model.train(training)
 
@@ -123,7 +123,7 @@ def log_weight_metrics(model: RotationClassfier, run):
             f"weights/{prefix}/variance": params.var(),
         })
     log_stats_for_module(model, "overall"),
-    log_stats_for_module(model.mobilenet_v2, "backbone"),
+    log_stats_for_module(model.efficientnet_v2, "backbone"),
     log_stats_for_module(model.classifier, "classifier"),
     model.train(training)
 
