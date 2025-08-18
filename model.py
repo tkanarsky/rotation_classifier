@@ -6,7 +6,7 @@ from dataset import get_train_dataset
 class RotationClassfier(nn.Module):
     def __init__(self):
         super().__init__()
-        self.mobilenet_v2 = mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT)
+        self.mobilenet_v2 = mobilenet_v2()
         self.mobilenet_v2.classifier = nn.Identity()
         self.classifier = nn.Sequential(
             nn.Dropout(p=0.2, inplace=False),

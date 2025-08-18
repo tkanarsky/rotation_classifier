@@ -9,8 +9,8 @@ from torchvision.transforms import v2
 
 flickr30k = load_dataset("nlphuji/flickr30k", num_proc=32)['test'] # only has test split for whatever reason...
 flickr30k_train, flickr30k_test = random_split(flickr30k, [0.8, 0.2])
-places365 = load_dataset("Andron00e/Places365-custom", num_proc=32)['train']   
-places365_train, places365_test = random_split(places365, [0.8, 0.2])
+#places365 = load_dataset("Andron00e/Places365-custom", num_proc=32)['train']   
+#places365_train, places365_test = random_split(places365, [0.8, 0.2])
 
 rotation_to_label = {
     0: 0,
@@ -72,14 +72,14 @@ def get_train_dataset(oversample: int = 1, rotation_sample_weights: dict[int, in
     datasets = []
     for i in range(oversample):
         datasets.append(RandomRotationDataset(flickr30k_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
-        datasets.append(RandomRotationDataset(places365_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
+ #       datasets.append(RandomRotationDataset(places365_train, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
 def get_test_dataset(oversample: int = 1, rotation_sample_weights: dict[int, int] | None = None) -> Dataset:
     datasets = []
     for i in range(oversample):
         datasets.append(RandomRotationDataset(flickr30k_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
-        datasets.append(RandomRotationDataset(places365_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
+ #       datasets.append(RandomRotationDataset(places365_test, xform=xform, rotation_sample_weights=rotation_sample_weights))
     return ConcatDataset(datasets)
 
 # Visualization of the first 25 images in ds in a 5x5 grid

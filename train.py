@@ -11,8 +11,8 @@ torch.set_float32_matmul_precision('medium')
 torch.backends.cudnn.benchmark = True
 
 config={
-    "lr_classifier": 1e-3,
-    "lr_backbone": 1e-4,
+    "lr_classifier": 1e-4,
+    "lr_backbone": 1e-5,
     "dataset_iterations": 4, # on average, each picture is shown in each orientation per epoch
     "scheduler": {
         "type": "cosine_warm_restarts",
@@ -32,16 +32,16 @@ config={
         180: 0.01,
         270: 0.01,
     },
-    "batch_size": 650,
-    "datasets": ["flickr30k", "places365"],
-    "epochs": 20,
-    "amp": True
+    "batch_size": 80,
+    "datasets": ["flickr30k"],
+    "epochs": 400, 
+    "amp": False
     # "checkpoint_file": "/Users/tim/projects/rotation_classifier/runs/dry-dust-39/46/ckpt.pt"
 }
 
 train, test = get_train_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['train_class_weights']), get_test_dataset(oversample=config['dataset_iterations'], rotation_sample_weights=config['test_class_weights'])
-train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=16, shuffle=True)
-test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=16, shuffle=True)
+train_loader = DataLoader(train, batch_size=config["batch_size"], num_workers=1, shuffle=True)
+test_loader = DataLoader(test, batch_size=config["batch_size"], num_workers=1, shuffle=True)
                          
 # Allows continuously sampling the test set during continuous evals.
 def cyclic_generator(loader: DataLoader):
@@ -60,7 +60,7 @@ else:
     model = RotationClassfier()
 model.to("cuda")
 print("Compiling...")
-model.compile()
+# model.compile()
 print("Compiled!")
 optimizer = torch.optim.AdamW([
     {"params": model.mobilenet_v2.parameters(), "lr": config['lr_backbone']}, 
@@ -211,7 +211,7 @@ if __name__ == "__main__":
        config=config
     )
     for i in range(config["epochs"]):
-        save_dir = Path("/workspace/rotation_classifier/runs") / run.name / str(i)
+        save_dir = Path("/home/tim/gits/rotation_classifier/runs") / run.name / str(i)
         save_dir.mkdir(exist_ok=True, parents=True)
         train_epoch(i, run)
         torch.save(model, Path("runs") / run.name / str(i) / "final.pt")
